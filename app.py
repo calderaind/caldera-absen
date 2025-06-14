@@ -1,5 +1,3 @@
-# app.py
-
 import streamlit as st
 from PIL import Image
 import numpy as np
@@ -11,12 +9,12 @@ from streamlit.components.v1 import html
 st.set_page_config(page_title="Scanner QR + Geolocation", layout="centered")
 st.title("📷 Scanner QR (Email) dengan Lokasi")
 
-# --- 1) Cek apakah lat/lon sudah ada di URL ---
-qs  = st.experimental_get_query_params()
+# --- 1) Baca lat/lon dari st.query_params ---
+qs  = st.query_params
 lat = qs.get("lat", [None])[0]
 lon = qs.get("lon", [None])[0]
 
-# --- 2) Jika belum, inject JS untuk minta izin Geolocation ---
+# --- 2) Jika belum ada, inject JS untuk minta izin Geolocation ---
 if lat is None or lon is None:
     st.info("🔒 Meminta izin lokasi… (browser akan mem-prompt)")
     js = """
