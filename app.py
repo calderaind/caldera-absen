@@ -7,74 +7,89 @@ import numpy as np
 import cv2
 import requests
 
-st.set_page_config(page_title="Scanner Absen GPS+Cam", layout="centered")
+st.set_page_config(page_title="Scanner Absen GPS + Kamera", layout="centered")
 
-# 1. Baca lat/lon dari URL
-qs = st.experimental_get_query_params()
-lat = qs.get("lat", [None])[0]
-lon = qs.get("lon", [None])[0]
+# ————————————————————————————————
+# 1) Geolocation: simpan di session_state setelah user klik tombol
+# ————————————————————————————————
+if 'lat' not in st.session_state or 'lon' not in st.session_state:
+    st.title("📍 Izinkan Lokasi & Kamera")
 
-# 2. Jika belum ada, inject JS untuk request Geolocation + Kamera
-if lat is None or lon is None:
-    st.title("🔒 Meminta izin lokasi & kamera…")
-    js = """
-    <script>
-    (async () => {
-      try {
-        // 1) Minta izin lokasi
-        const pos = await new Promise((res, rej) =>
-          navigator.geolocation.getCurrentPosition(res, rej)
-        );
-        const lat = pos.coords.latitude;
-        const lon = pos.coords.longitude;
-        // 2) Minta izin kamera
-        await navigator.mediaDevices.getUserMedia({ video: true });
-        // 3) Sisipkan ke URL & reload
-        const url = new URL(window.location);
-        url.searchParams.set('lat', lat);
-        url.searchParams.set('lon', lon);
-        window.history.replaceState({}, '', url);
-        window.location.reload();
-      } catch (err) {
-        console.error(err);
-        alert('Gagal dapatkan izin: ' + err.message);
-      }
-    })();
-    </script>
-    """
-    # render zero‐height HTML (hanya JS)
-    html(js, height=0)
+    st.write(
+        "Klik tombol di bawah untuk meminta izin lokasi (GPS) dan kamera. "
+        "Browser akan memunculkan prompt. Setelah diijinkan, halaman akan reload."
+    )
+    if st.button("🔐 Izinkan Lokasi & Kamera"):
+        js = """
+        <script>
+        (async () => {
+          try {
+            // 1) Prompt Geolocation
+            const pos = await new Promise((res, rej) =>
+              navigator.geolocation.getCurrentPosition(res, rej)
+            );
+            const lat = pos.coords.latitude;
+            const lon = pos.coords.longitude;
+            // 2) Prompt Kamera
+            await navigator.mediaDevices.getUserMedia({ video: true });
+            // 3) Kirim data kembali ke Streamlit via hash URL
+            const url = new URL(window.location);
+            // gunakan hash agar st.experimental_get_query_params bisa tetap membaca
+            url.searchParams.set('lat', lat);
+            url.searchParams.set('lon', lon);
+            window.location.href = url.toString();
+          } catch (err) {
+            alert('Gagal mendapatkan izin: ' + err.message);
+          }
+        })();
+        </script>
+        """
+        # inject HTML+JS
+        html(js, height=0)
     st.stop()
 
-# 3. Jika sudah ada lat/lon, lanjut app
+# ————————————————————————————————
+# 2) Ambil lat/lon dari query params
+# ————————————————————————————————
+qs   = st.experimental_get_query_params()
+lat  = qs.get("lat", [None])[0]
+lon  = qs.get("lon", [None])[0]
+
+# Jika tombol sudah diklik dan URL sudah berisi lat/lon, kita lanjut:
+if not lat or not lon:
+    st.error("⚠️ Gagal membaca lokasi. Silakan ulangi proses izin lokasi.")
+    st.stop()
+
+# ————————————————————————————————
+# 3) Tampilkan scanner kamera
+# ————————————————————————————————
 st.title("📷 Scanner Absen (GPS + Kamera)")
 st.success(f"Lokasi device: {lat}, {lon}")
 
-# 4. Ambil gambar dari kamera via Streamlit
-img_buffer = st.camera_input("Arahkan kamera ke QR/barcode lalu foto")
+img_buffer = st.camera_input("Arahkan kamera ke QR/barcode dan tekan Capture")
 
 if img_buffer:
-    # 4a. Preview
+    # Preview
     img = Image.open(img_buffer)
     st.image(img, caption="Preview", use_column_width=True)
 
-    # 4b. Decode QR/barcode (OpenCV)
-    img_cv = cv2.cvtColor(np.array(img), cv2.COLOR_RGB2BGR)
+    # Decode QR/barcode
+    img_cv   = cv2.cvtColor(np.array(img), cv2.COLOR_RGB2BGR)
     detector = cv2.QRCodeDetector()
-    email, pts, _ = detector.detectAndDecode(img_cv)
+    email, _, _ = detector.detectAndDecode(img_cv)
 
     if email:
         st.success(f"✉️ Email ter-scan: {email}")
 
-        # 5. Panggil API absen dengan lat & long
+        # 4) Kirim ke API absen
         api_url = f"https://caldera.digisight-id.com/public/api/absen/{email}"
-        params = {"lat": lat, "long": lon}
+        params  = {"lat": lat, "long": lon}
         try:
-            res = requests.get(api_url, params=params, timeout=5)
-            res.raise_for_status()
+            resp = requests.get(api_url, params=params, timeout=5)
+            resp.raise_for_status()
             st.markdown("**✅ Response server:**")
-            st.json(res.json())
+            st.json(resp.json())
         except Exception as e:
-            st.error(f"❌ Gagal koneksi/API:\n{e}")
+            st.error(f"❌ Gagal koneksi ke API:\n{e}")
     else:
-        st.warning("❌ QR/barcode tidak terdeteksi. Coba ulangi.")
+        st.warning("❌ QR/barcode tidak terdeteksi. Coba ulangi lagi.")
