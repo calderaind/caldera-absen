@@ -8,7 +8,7 @@ import requests
 
 # --- Setup halaman ---
 st.set_page_config(page_title="Scanner Absen", layout="centered")
-st.title("📷 Scanner Absen")
+st.title("Scanner Absen")
 
 # --- Ambil foto dari kamera ---
 img_buffer = st.camera_input("Arahkan kamera ke QR/barcode lalu tekan tombol Capture")
