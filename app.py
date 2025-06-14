@@ -7,7 +7,7 @@ import cv2
 import requests
 
 # --- Setup halaman ---
-st.set_page_config(page_title="Scanner QR + Lokasi Otomatis", layout="centered")
+st.set_page_config(page_title="Scanner Absen", layout="centered")
 st.title("📷 Scanner Absen")
 
 # --- Ambil foto dari kamera ---
