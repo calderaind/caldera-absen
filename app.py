@@ -1,95 +1,76 @@
 # app.py
 
 import streamlit as st
-from streamlit.components.v1 import html
-from PIL import Image
-import numpy as np
+from streamlit_webrtc import webrtc_streamer, VideoProcessorBase
+import av
 import cv2
+import numpy as np
 import requests
 
-st.set_page_config(page_title="Scanner Absen GPS + Kamera", layout="centered")
+st.set_page_config(page_title="Take Photo & Scan QR", layout="centered")
+st.title("📷 Camera Capture & QR Scanner")
 
-# ————————————————————————————————
-# 1) Geolocation: simpan di session_state setelah user klik tombol
-# ————————————————————————————————
-if 'lat' not in st.session_state or 'lon' not in st.session_state:
-    st.title("📍 Izinkan Lokasi & Kamera")
+# 1) Buat processor untuk menyimpan frame terakhir
+class PhotoProcessor(VideoProcessorBase):
+    def __init__(self):
+        self.frame = None      # last frame from camera
+        self.captured = False  # flag apakah sudah capture
 
-    st.write(
-        "Klik tombol di bawah untuk meminta izin lokasi (GPS) dan kamera. "
-        "Browser akan memunculkan prompt. Setelah diijinkan, halaman akan reload."
-    )
-    if st.button("🔐 Izinkan Lokasi & Kamera"):
-        js = """
-        <script>
-        (async () => {
-          try {
-            // 1) Prompt Geolocation
-            const pos = await new Promise((res, rej) =>
-              navigator.geolocation.getCurrentPosition(res, rej)
-            );
-            const lat = pos.coords.latitude;
-            const lon = pos.coords.longitude;
-            // 2) Prompt Kamera
-            await navigator.mediaDevices.getUserMedia({ video: true });
-            // 3) Kirim data kembali ke Streamlit via hash URL
-            const url = new URL(window.location);
-            // gunakan hash agar st.experimental_get_query_params bisa tetap membaca
-            url.searchParams.set('lat', lat);
-            url.searchParams.set('lon', lon);
-            window.location.href = url.toString();
-          } catch (err) {
-            alert('Gagal mendapatkan izin: ' + err.message);
-          }
-        })();
-        </script>
-        """
-        # inject HTML+JS
-        html(js, height=0)
-    st.stop()
+    def recv(self, video_frame: av.VideoFrame) -> av.VideoFrame:
+        img = video_frame.to_ndarray(format="bgr24")
+        if not self.captured:
+            # selalu update frame selama belum capture
+            self.frame = img
+        return av.VideoFrame.from_ndarray(img, format="bgr24")
 
-# ————————————————————————————————
-# 2) Ambil lat/lon dari query params
-# ————————————————————————————————
-qs   = st.experimental_get_query_params()
-lat  = qs.get("lat", [None])[0]
-lon  = qs.get("lon", [None])[0]
+# 2) Tampilkan live‐camera & instansiasi processor
+ctx = webrtc_streamer(
+    key="photo",
+    video_processor_factory=PhotoProcessor,
+    media_stream_constraints={"video": True, "audio": False},
+    async_processing=True,
+)
 
-# Jika tombol sudah diklik dan URL sudah berisi lat/lon, kita lanjut:
-if not lat or not lon:
-    st.error("⚠️ Gagal membaca lokasi. Silakan ulangi proses izin lokasi.")
-    st.stop()
+# 3) Tombol untuk capture
+if ctx.video_processor:
+    proc: PhotoProcessor = ctx.video_processor
 
-# ————————————————————————————————
-# 3) Tampilkan scanner kamera
-# ————————————————————————————————
-st.title("📷 Scanner Absen (GPS + Kamera)")
-st.success(f"Lokasi device: {lat}, {lon}")
+    col1, col2 = st.columns(2)
+    with col1:
+        take = st.button("📸 Take Photo")
+    with col2:
+        reset = st.button("🔄 Reset")
 
-img_buffer = st.camera_input("Arahkan kamera ke QR/barcode dan tekan Capture")
+    if take:
+        proc.captured = True
 
-if img_buffer:
-    # Preview
-    img = Image.open(img_buffer)
-    st.image(img, caption="Preview", use_column_width=True)
+    if reset:
+        proc.captured = False
 
-    # Decode QR/barcode
-    img_cv   = cv2.cvtColor(np.array(img), cv2.COLOR_RGB2BGR)
-    detector = cv2.QRCodeDetector()
-    email, _, _ = detector.detectAndDecode(img_cv)
+    # 4) Jika sudah capture, tampilkan snapshot
+    if proc.captured and proc.frame is not None:
+        st.image(
+            proc.frame[:, :, ::-1],  # BGR → RGB
+            caption="📷 Captured Photo",
+            use_column_width=True
+        )
 
-    if email:
-        st.success(f"✉️ Email ter-scan: {email}")
+        # 5) Decode QR/barcode
+        detector = cv2.QRCodeDetector()
+        data, pts, _ = detector.detectAndDecode(proc.frame)
+        if data:
+            st.success(f"✉️ Email ter-scan: {data}")
 
-        # 4) Kirim ke API absen
-        api_url = f"https://caldera.digisight-id.com/public/api/absen/{email}"
-        params  = {"lat": lat, "long": lon}
-        try:
-            resp = requests.get(api_url, params=params, timeout=5)
-            resp.raise_for_status()
-            st.markdown("**✅ Response server:**")
-            st.json(resp.json())
-        except Exception as e:
-            st.error(f"❌ Gagal koneksi ke API:\n{e}")
+            # 6) (Opsional) kirim ke API absen
+            api_url = f"https://caldera.digisight-id.com/public/api/absen/{data}"
+            try:
+                r = requests.get(api_url, timeout=5)
+                r.raise_for_status()
+                st.json(r.json())
+            except Exception as e:
+                st.error(f"Gagal memanggil API:\n{e}")
+        else:
+            st.warning("❌ QR/barcode tidak terdeteksi di foto.")
+
     else:
-        st.warning("❌ QR/barcode tidak terdeteksi. Coba ulangi lagi.")
+        st.info("Arahkan kamera, lalu klik **Take Photo** untuk capture.")
