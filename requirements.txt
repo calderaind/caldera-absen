@@ -1,6 +1,3 @@
 streamlit
-streamlit_js_eval
-Pillow
-opencv-python-headless
-numpy
 requests
+pytz
