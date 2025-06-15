@@ -1,11 +1,6 @@
-# --- core ---
-streamlit>=1.34
-streamlit_js_eval>=0.1.5
-
-# --- image / QR ---
-Pillow>=10.3
-opencv-python-headless==4.10.0.80   # headless → ringan untuk server
-numpy>=1.26
-
-# --- networking ---
-requests>=2.32
+streamlit
+streamlit_js_eval
+Pillow
+opencv-python-headless
+numpy
+requests
