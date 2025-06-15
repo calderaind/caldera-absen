@@ -1,4 +1,3 @@
-# app.py
 import streamlit as st
 import requests
 from datetime import datetime
@@ -8,13 +7,15 @@ st.set_page_config(page_title="Check-In Caldera", layout="centered")
 st.title("🗺️ Check-In via Google Maps API")
 
 # 1. Ambil API Key dari Streamlit Secrets
+GOOGLE_API_KEY = "AIzaSyCjnPEeMHTMyMJV_dORJS0sIL-sImZgXHw"
 
 # 2. Geolocation menggunakan Google Geolocation API
 with st.spinner("Menentukan lokasi via Google Geolocation API…"):
     try:
         geo_res = requests.post(
-            f"https://maps.googleapis.com/maps/api/js?key=AIzaSyCjnPEeMHTMyMJV_dORJS0sIL-sImZgXHw",
-            json={}  # kosong saja, Google akan pakai cell/wifi default
+            "https://www.googleapis.com/geolocation/v1/geolocate",
+            params={"key": GOOGLE_API_KEY},
+            json={}  # kosong → Google akan pakai cell/wifi default
         )
         geo_res.raise_for_status()
         loc = geo_res.json()["location"]
@@ -35,6 +36,7 @@ with st.spinner("Memeriksa area via reverse-geocoding…"):
                 "language": "id"
             }
         ).json()
+        # ambil administrative_area_level_2 atau _1
         comps = rev["results"][0]["address_components"]
         area = next(
             (c["long_name"] for c in comps
@@ -43,7 +45,7 @@ with st.spinner("Memeriksa area via reverse-geocoding…"):
             None
         )
         st.info(f"Teridentifikasi area: **{area}**")
-        if area is None or "Jakarta" not in area:
+        if not area or "Jakarta" not in area:
             st.error("❌ Lokasi bukan di Jakarta → check-in diblokir.")
             st.stop()
     except Exception as e:
