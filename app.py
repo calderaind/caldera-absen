@@ -13,7 +13,7 @@ st.title("🗺️ Check-In via Google Maps API")
 with st.spinner("Menentukan lokasi via Google Geolocation API…"):
     try:
         geo_res = requests.post(
-            f"https://www.googleapis.com/geolocation/v1/geolocate?key=AIzaSyCjnPEeMHTMyMJV_dORJS0sIL-sImZgXHw",
+            f"https://maps.googleapis.com/maps/api/js?key=AIzaSyCjnPEeMHTMyMJV_dORJS0sIL-sImZgXHw",
             json={}  # kosong saja, Google akan pakai cell/wifi default
         )
         geo_res.raise_for_status()
