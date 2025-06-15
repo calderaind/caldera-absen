@@ -19,7 +19,7 @@ st.title("🗺️ Check-In via Google Maps API")
 # 2. Ambil Google API Key dari secrets.toml
 # ————————————————————————————————
 try:
-    GOOGLE_API_KEY = st.secrets["general"]["google_maps_api_key"]
+    GOOGLE_API_KEY = "AIzaSyCjnPEeMHTMyMJV_dORJS0sIL-sImZgXHw"
 except Exception:
     st.error("⚠️ Tambahkan `google_maps_api_key` di ~/.streamlit/secrets.toml")
     st.stop()
