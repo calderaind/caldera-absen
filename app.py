@@ -1,76 +1,106 @@
-# app.py
 import streamlit as st
-import requests, json
+import numpy as np
+import cv2
+from PIL import Image
+from streamlit_js_eval import get_geolocation
+import requests
 from datetime import datetime
 import pytz
+from zoneinfo import ZoneInfo
 
-st.set_page_config(page_title="Caldera Check-In", layout="centered")
-st.title("🗺️ Check-In via Google Maps API")
+# ════════════════════════════════════════
+# 0. Konfigurasi halaman
+# ════════════════════════════════════════
+st.set_page_config("Caldera Absen", layout="centered")
+st.title("📸→📍 Caldera Absen")
 
-API_KEY = "AIzaSyCjnPEeMHTMyMJV_dORJS0sIL-sImZgXHw"   # ← hard-coded
+# State helper
+if "qr_data" not in st.session_state:
+    st.session_state["qr_data"] = None
+if "coords" not in st.session_state:
+    st.session_state["coords"] = None
 
-def call_geolocation():
-    payload = {"considerIp": True}   # minimal payload
-    # 1) endpoint “location.googleapis.com” (Maps Platform)
-    url1 = "https://location.googleapis.com/v1/geolocate"
-    # 2) endpoint legacy “www.googleapis.com”
-    url2 = "https://www.googleapis.com/geolocation/v1/geolocate"
+# ════════════════════════════════════════
+# 1. Capture / upload barcode dulu
+# ════════════════════════════════════════
+st.header("LScan barcode/QR")
 
-    for url in (url1, url2):
-        st.write("🔗 Mencoba:", f"{url}?key=API_KEY")
-        resp = requests.post(url, params={"key": API_KEY}, json=payload)
-        if resp.status_code == 200:
-            return resp.json()["location"]
-        # tampilkan isi error utk debugging
-        st.warning(f"   → {resp.status_code} {resp.reason}: {resp.text[:120]}…")
-    # kalau dua-duanya gagal:
-    resp.raise_for_status()
+cam_image = st.camera_input("Ambil foto barcode/QR")
 
-# ──────────────────────────────────────
-with st.spinner("Mengambil koordinat…"):
-    try:
-        loc = call_geolocation()
-        lat, lon = loc["lat"], loc["lng"]
-        st.success(f"📍 Koordinat: {lat:.6f}, {lon:.6f}")
-    except Exception as e:
-        st.error(f"Gagal geolokasi: {e}")
-        st.stop()
+image_src = cam_image
 
-# ── Reverse geocode utk validasi Jakarta ──
-with st.spinner("Reverse-geocoding…"):
-    try:
-        g = requests.get(
-            "https://maps.googleapis.com/maps/api/geocode/json",
-            params={"latlng": f"{lat},{lon}", "key": API_KEY, "language": "id"},
-            timeout=10,
-        ).json()
-        area = next(
-            (c["long_name"] for c in g["results"][0]["address_components"]
-             if "administrative_area_level_1" in c["types"]
-             or "administrative_area_level_2" in c["types"]), None)
-        st.info(f"🏙️ Area: **{area}**")
-        if not area or "Jakarta" not in area:
-            st.error("Lokasi di luar Jakarta → Check-in diblokir.")
-            st.stop()
-    except Exception as e:
-        st.error(f"Reverse-geocode error: {e}")
-        st.stop()
+def decode_qr(pil_img):
+    """Return decoded text or None."""
+    img = cv2.cvtColor(np.array(pil_img), cv2.COLOR_RGB2BGR)
+    detector = cv2.QRCodeDetector()
+    val, _, _ = detector.detectAndDecode(img)
+    return val if val else None
 
-# ── Waktu WIB & tombol Check-in ──
-now_wib = datetime.now(pytz.timezone("Asia/Jakarta"))
-time_iso = now_wib.isoformat()
-st.write("⏰ Waktu (WIB):", now_wib.strftime("%Y-%m-%d %H:%M:%S"))
+if image_src and st.session_state["qr_data"] is None:
+    pil = Image.open(image_src)
+    data = decode_qr(pil)
+    if data:
+        st.success(f"✅ QR ter-decode: **{data}**")
+        st.session_state["qr_data"] = data
+    else:
+        st.error("❌ QR tidak terdeteksi—coba ulangi, pastikan fokus & cahaya cukup.")
 
-email = st.text_input("✉️ Email", "caldera.indonesia2017@gmail.com")
-if st.button("✅ Check-In"):
-    api_url = f"https://caldera.digisight-id.com/public/api/absen/{email}"
-    params  = {"lat": lat, "long": lon, "time": time_iso}
-    st.write("🔗 ", api_url, params)
-    with st.spinner("Mengirim…"):
-        try:
-            r = requests.get(api_url, params=params, timeout=10)
-            r.raise_for_status()
-            st.json(r.json())
-            st.success("✔️ Check-in sukses!")
-        except Exception as err:
-            st.error(f"Check-in gagal: {err}")
+# ════════════════════════════════════════
+# 2. Minta geolokasi **setelah** QR sukses
+# ════════════════════════════════════════
+if st.session_state["qr_data"]:
+    st.header("Ambil lokasi")
+    if st.session_state["coords"] is None:
+        with st.spinner("Meminta izin lokasi ke browser…"):
+            try:
+                geo = get_geolocation()  # dialog Allow Location
+                st.session_state["coords"] = {
+                    "lat": geo["coords"]["latitude"],
+                    "lon": geo["coords"]["longitude"],
+                    "acc": geo["coords"].get("accuracy", "–")
+                }
+            except Exception as e:
+                st.error(f"Gagal mendapat geolokasi: {e}")
+    if st.session_state["coords"]:
+        lat  = st.session_state["coords"]["lat"]
+        lon  = st.session_state["coords"]["lon"]
+        acc  = st.session_state["coords"]["acc"]
+        st.success(f"📍 Koordinat: {lat:.6f}, {lon:.6f} (±{acc} m)")
+
+# ════════════════════════════════════════
+# 3. Kirim Check-In  (tombol aktif kalau dua-duanya OK)
+# ════════════════════════════════════════
+if st.session_state["qr_data"] and st.session_state["coords"]:
+    st.header("Kirim Absen")
+
+    # Asumsikan isi QR = email; jika bukan, user bisa edit
+    email_default = st.session_state["qr_data"] if "@" in st.session_state["qr_data"] else "caldera.indonesia2017@gmail.com"
+    email = st.text_input("✉️ Email", value=email_default)
+
+    # Waktu WIB
+    wib = ZoneInfo("Asia/Jakarta")
+    time_iso = datetime.now(wib).isoformat()
+
+    print(time_iso)
+
+    if st.button("✅ SUBMIT"):
+        api_url = f"https://caldera.digisight-id.com/public/api/absen/{email}"
+        params  = {"lat": lat, "long": lon, "time": time_iso}
+
+        with st.spinner("Mengirim ke server…"):
+            try:
+                r = requests.get(api_url, params=params, timeout=10)
+                r.raise_for_status()
+                st.json(r.json())
+                st.success("🎉 Check-in berhasil!")
+                # Hapus state biar bisa coba lagi
+                st.session_state.qr_data = None
+                st.session_state.coords  = None
+            except Exception as err:
+                st.error(f"Check-in gagal: {err}")
+
+st.markdown("---")
+st.caption(
+    "Alur wajib: ① scan barcode/QR → ② izinkan lokasi → ③ kirim ke server.\n"
+    "Tidak perlu Google Geolocation API, sehingga bebas dari error 404."
+)
