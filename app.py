@@ -140,7 +140,8 @@ if st.session_state["qr_data"] and st.session_state["coords"]:
             payload = {
                 "to": email,
                 "subject": "Sertifikat Seminar Caldera",
-                "body": f"Halo {name},\n\nTerima kasih telah hadir. Berikut sertifikat Anda."
+                # "body": f"Halo {name},\n\nTerima kasih telah hadir. Berikut sertifikat Anda."
+                "body": f"Salam hormat,\n\nTeriring salam dan rasa hormat yang setinggi-tingginya, kami menyampaikan ucapan terima kasih yang sebesar-besarnya atas kehadiran Bapak/Ibu dalam kegiatan Seminar STRATEGI SUKSES DIMULAI DARI SMA/SMK yang diselenggarakan pada:\n\n📅 Hari, Tanggal: Kamis, 19 Juni 2025\n📍 Tempat: Ruang TDC, SMA Plus YPHB\n🏙️ Alamat: Jalan Pajajaran, Kota \n\nPartisipasi aktif dan antusiasme Bapak/Ibu dalam mengikuti rangkaian acara menjadi semangat tersendiri bagi kami, Caldera Indonesia dan BMPS Kota Bogor, untuk terus menghadirkan kolaborasi strategis yang memberikan dampak nyata dalam dunia pendidikan, khususnya dalam pengembangan potensi dan perencanaan masa depan siswa-siswi SMA/SMK di era digital saat ini.\n\nKami berharap materi yang disampaikan dalam seminar ini dapat memberikan manfaat, wawasan baru, serta inspirasi dalam mendampingi peserta didik agar lebih memahami arah karier dan kompetensinya di tengah perubahan dunia kerja yang semakin cepat dan kompleks.\n\nSebagai bentuk apresiasi atas partisipasi Bapak/Ibu, bersama ini kami lampirkan sertifikat keikutsertaan yang dikeluarkan oleh Caldera Indonesia dan BMPS Kota Bogor.\n\nSemoga kerja sama ini menjadi langkah awal dari sinergi berkelanjutan dalam membangun masa depan pendidikan yang lebih adaptif dan relevan.\n\nHormat kami,\nTim Caldera Indonesia\nBMPS Kota Bogor"
             }
             with st.spinner("Mengirim email…"):
                 mail = requests.post(MAIL_API_URL, data=payload, files=files, timeout=10)
