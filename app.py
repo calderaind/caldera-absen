@@ -1,106 +1,157 @@
 import streamlit as st
 import numpy as np
 import cv2
-from PIL import Image
+from PIL import Image, ImageDraw, ImageFont
 from streamlit_js_eval import get_geolocation
 import requests
 from datetime import datetime
-import pytz
 from zoneinfo import ZoneInfo
+import io
 
-# ════════════════════════════════════════
-# 0. Konfigurasi halaman
-# ════════════════════════════════════════
+# ═════════════════════════════
+# 0. Konfigurasi dan helper
+# ═════════════════════════════
 st.set_page_config("Caldera Absen", layout="centered")
-st.title("📸→📍 Caldera Absen")
+st.title("📸→📍 Caldera Absen + Certificate")
 
-# State helper
+TEMPLATE_PATH   = "./sertif.png"                # file template sertifikat
+MAIL_API_URL    = "https://caldera.digisight-id.com/public/api/send-email"
+
+def generate_certificate(name: str) -> bytes:
+    # 1) buka template
+    img = Image.open(TEMPLATE_PATH).convert("RGB")
+    draw = ImageDraw.Draw(img)
+    W, H = img.size
+
+    # 2) load font TrueType (ukuran besar)
+    font_size = 80
+    
+    try:
+        # coba Arial Bold
+        font = ImageFont.truetype("arialbd.ttf", font_size)
+    except OSError:
+        # fallback ke DejaVuSans-Bold (Linux/macOS)
+        font = ImageFont.truetype("DejaVuSans-Bold.ttf", font_size)
+
+    # 3) hitung bbox teks
+    bbox = draw.textbbox((0, 0), name, font=font)
+    text_w = bbox[2] - bbox[0]
+    text_h = bbox[3] - bbox[1]
+
+    # 4) posisi center
+    x = (W - text_w) / 2
+    y = H * 0.31  # sesuaikan jika perlu
+
+    # 5) gambar teks
+    draw.text((x, y), name, fill="black", font=font)
+
+    # 6) simpan ke bytes
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    buf.seek(0)
+    return buf.getvalue()
+# ═════════════════════════════
+# 1. Scan QR
+# ═════════════════════════════
 if "qr_data" not in st.session_state:
     st.session_state["qr_data"] = None
 if "coords" not in st.session_state:
     st.session_state["coords"] = None
 
-# ════════════════════════════════════════
-# 1. Capture / upload barcode dulu
-# ════════════════════════════════════════
-st.header("LScan barcode/QR")
-
+st.header("1️⃣ Scan barcode/QR")
 cam_image = st.camera_input("Ambil foto barcode/QR")
 
-image_src = cam_image
-
 def decode_qr(pil_img):
-    """Return decoded text or None."""
     img = cv2.cvtColor(np.array(pil_img), cv2.COLOR_RGB2BGR)
     detector = cv2.QRCodeDetector()
     val, _, _ = detector.detectAndDecode(img)
-    return val if val else None
+    return val or None
 
-if image_src and st.session_state["qr_data"] is None:
-    pil = Image.open(image_src)
+if cam_image and st.session_state["qr_data"] is None:
+    pil = Image.open(cam_image)
     data = decode_qr(pil)
     if data:
         st.success(f"✅ QR ter-decode: **{data}**")
         st.session_state["qr_data"] = data
     else:
-        st.error("❌ QR tidak terdeteksi—coba ulangi, pastikan fokus & cahaya cukup.")
+        st.error("❌ QR tidak terdeteksi—coba ulangi.")
 
-# ════════════════════════════════════════
-# 2. Minta geolokasi **setelah** QR sukses
-# ════════════════════════════════════════
+
+# ═════════════════════════════
+# 2. Ambil geolokasi
+# ═════════════════════════════
 if st.session_state["qr_data"]:
-    st.header("Ambil lokasi")
+    st.header("2️⃣ Izinkan lokasi")
     if st.session_state["coords"] is None:
-        with st.spinner("Meminta izin lokasi ke browser…"):
+        with st.spinner("Meminta izin…"):
             try:
-                geo = get_geolocation()  # dialog Allow Location
+                geo = get_geolocation()
                 st.session_state["coords"] = {
                     "lat": geo["coords"]["latitude"],
                     "lon": geo["coords"]["longitude"],
                     "acc": geo["coords"].get("accuracy", "–")
                 }
             except Exception as e:
-                st.error(f"Gagal mendapat geolokasi: {e}")
+                st.error(f"Gagal: {e}")
     if st.session_state["coords"]:
-        lat  = st.session_state["coords"]["lat"]
-        lon  = st.session_state["coords"]["lon"]
-        acc  = st.session_state["coords"]["acc"]
-        st.success(f"📍 Koordinat: {lat:.6f}, {lon:.6f} (±{acc} m)")
+        c = st.session_state["coords"]
+        st.success(f"📍 {c['lat']:.6f}, {c['lon']:.6f} (±{c['acc']} m)")
 
-# ════════════════════════════════════════
-# 3. Kirim Check-In  (tombol aktif kalau dua-duanya OK)
-# ════════════════════════════════════════
+
+# ═════════════════════════════
+# 3. Kirim absen & generate sertifikat
+# ═════════════════════════════
 if st.session_state["qr_data"] and st.session_state["coords"]:
-    st.header("Kirim Absen")
-
-    # Asumsikan isi QR = email; jika bukan, user bisa edit
-    email_default = st.session_state["qr_data"] if "@" in st.session_state["qr_data"] else "caldera.indonesia2017@gmail.com"
+    st.header("3️⃣ Kirim Absen")
+    email_default = st.session_state["qr_data"] if "@" in st.session_state["qr_data"] else ""
     email = st.text_input("✉️ Email", value=email_default)
-
-    # Waktu WIB
     wib = ZoneInfo("Asia/Jakarta")
     time_iso = datetime.now(wib).isoformat()
 
-    print(time_iso)
-
     if st.button("✅ SUBMIT"):
         api_url = f"https://caldera.digisight-id.com/public/api/absen/{email}"
-        params  = {"lat": lat, "long": lon, "time": time_iso}
+        params  = {"lat": st.session_state["coords"]["lat"],
+                   "long": st.session_state["coords"]["lon"],
+                   "time": time_iso}
 
-        with st.spinner("Mengirim ke server…"):
+        with st.spinner("Mengirim absen…"):
             try:
                 r = requests.get(api_url, params=params, timeout=10)
                 r.raise_for_status()
-                st.json(r.json())
-                st.success("🎉 Check-in berhasil!")
-                # Hapus state biar bisa coba lagi
-                st.session_state.qr_data = None
-                st.session_state.coords  = None
+                data = r.json()
+                st.json(data)
             except Exception as err:
-                st.error(f"Check-in gagal: {err}")
+                st.error(f"Absen gagal: {err}")
+                st.stop()
 
-st.markdown("---")
-st.caption(
-    "Alur wajib: ① scan barcode/QR → ② izinkan lokasi → ③ kirim ke server.\n"
-    "Tidak perlu Google Geolocation API, sehingga bebas dari error 404."
-)
+        # ---- jika check-out (kode 200) ada 'name' di response
+        if r.status_code == 200 and data.get("name"):
+            name = data["name"]
+            st.success(f"Check-out untuk **{name}** tercatat!")
+
+            # 1) generate certificate
+            cert_bytes = generate_certificate(name)
+            st.image(cert_bytes, caption="Preview Sertifikat", use_column_width=True)
+
+            # 2) kirim email via API Laravel
+            files = {
+                "image": ("certificate.png", cert_bytes, "image/png")
+            }
+            payload = {
+                "to": email,
+                "subject": "Sertifikat Seminar Caldera",
+                "body": f"Halo {name},\n\nTerima kasih telah hadir. Berikut sertifikat Anda."
+            }
+            with st.spinner("Mengirim email…"):
+                mail = requests.post(MAIL_API_URL, data=payload, files=files, timeout=10)
+                if mail.ok:
+                    st.success("📧 Sertifikat berhasil dikirim ke email.")
+                else:
+                    st.error(f"Gagal kirim email: {mail.text}")
+
+        # reset state biar bisa absen lagi
+        st.session_state.qr_data = None
+        st.session_state.coords  = None
+
+# st.markdown("---")
+# st.caption("Pastikan file `sertif.png` & font TTF ada di folder project sebelum run.") 
